@@ -1,0 +1,214 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Boss Battle Ultra-Difícil</title>
+<style>
+html,body{margin:0;padding:0;overflow:hidden;background:black;color:white;font-family:Arial;}
+canvas{display:block;}
+.screen{position:fixed;inset:0;display:flex;flex-direction:column;justify-content:center;align-items:center;background:black;z-index:10;}
+button{padding:14px 28px;font-size:18px;}
+</style>
+</head>
+<body>
+
+<div id="startScreen" class="screen">
+<h1>BOSS BATTLE HARDCORE</h1>
+<button onclick="startGame()">START</button>
+</div>
+
+<div id="gameOverScreen" class="screen" style="display:none">
+<h1>GAME OVER</h1>
+<p id="finalScore"></p>
+<button onclick="startGame()">RESTART</button>
+</div>
+
+<canvas id="game"></canvas>
+
+<script>
+const canvas=document.getElementById("game");
+const ctx=canvas.getContext("2d");
+function resize(){canvas.width=innerWidth;canvas.height=innerHeight;}
+resize();addEventListener("resize",resize);
+
+// ===== SCORE =====
+let score=0;
+let bestScore=Number(localStorage.getItem("bestScore"))||0;
+
+// ===== PLAYER =====
+const player={x:canvas.width/2,y:canvas.height-140,r:14,speed:380,vx:0,vy:0,alive:true};
+
+// ===== TOUCH CONTROLS =====
+let touchOrigin=null;
+canvas.addEventListener("touchstart",e=>{touchOrigin={x:e.touches[0].clientX,y:e.touches[0].clientY};});
+canvas.addEventListener("touchmove",e=>{
+  if(!touchOrigin)return;
+  const dx=e.touches[0].clientX-touchOrigin.x;
+  const dy=e.touches[0].clientY-touchOrigin.y;
+  const dist=Math.hypot(dx,dy);
+  const strength=Math.min(dist/90,1);
+  player.vx=(dx/(dist||1))*strength;
+  player.vy=(dy/(dist||1))*strength;
+});
+canvas.addEventListener("touchend",()=>{touchOrigin=null;player.vx=0;player.vy=0;});
+
+// ===== KEYBOARD CONTROLS =====
+const keys={};
+addEventListener("keydown",e=>keys[e.key.toLowerCase()]=true);
+addEventListener("keyup",e=>keys[e.key.toLowerCase()]=false);
+
+// ===== BOSS =====
+const boss={x:canvas.width/2-40,y:30,w:80,h:40,speed:180};
+
+// ===== ATTACKS =====
+let beams=[];
+let attackDelay=2;
+let attackCooldown=1; // mais rápido
+let running=false;
+let phase2=false;
+let phaseTimer=0;
+
+// ===== ATTACK VARIANTS =====
+function verticalWide(){beams.push({type:"v",x:Math.random()*canvas.width,w:40,t:1});}
+function horizontalWide(){beams.push({type:"h",y:Math.random()*canvas.height,h:40,t:1});}
+function diagonal(){beams.push({type:"d",offset:(Math.random()-0.5)*200,angle:Math.PI/4 + (Math.random()-0.5)*0.3,t:1});}
+function crossSingle(x,y){beams.push({type:"v",x:x||Math.random()*canvas.width,w:40,t:1});beams.push({type:"h",y:y||Math.random()*canvas.height,h:40,t:1});}
+function crossXSingle(x,y){beams.push({type:"d",angle:Math.PI/4,offset:0,t:1,x:x||Math.random()*canvas.width,y:y||Math.random()*canvas.height});beams.push({type:"d",angle:-Math.PI/4,offset:0,t:1,x:x||Math.random()*canvas.width,y:y||Math.random()*canvas.height});}
+
+// ===== SPAWN ATTACKS =====
+function spawnAttack(){
+    beams=[];
+    const variants=[verticalWide,horizontalWide,diagonal,crossSingle,crossXSingle];
+    const n=Math.floor(Math.random()*3)+2; // mais ataques
+    for(let i=0;i<n;i++){
+        const attackFunc = variants[Math.floor(Math.random()*variants.length)];
+        if(phase2 && (attackFunc===crossSingle || attackFunc===crossXSingle)){
+            attackFunc(player.x+Math.random()*120-60, player.y+Math.random()*120-60);
+        }else{
+            attackFunc();
+        }
+    }
+}
+
+// ===== MAIN LOOP =====
+let lastTime=performance.now();
+function loop(time){
+    if(!running) return;
+    const dt=(time-lastTime)/1000;
+    lastTime=time;
+
+    ctx.clearRect(0,0,canvas.width,canvas.height);
+    if(player.alive) score+=dt*1.5;
+    phaseTimer+=dt;
+
+    if(phaseTimer>20) phase2=true; // fase 2 mais cedo
+
+    // PLAYER CONTROLS (WASD)
+    let px=0,py=0;
+    if(keys.w) py-=1;
+    if(keys.s) py+=1;
+    if(keys.a) px-=1;
+    if(keys.d) px+=1;
+    const len=Math.hypot(px,py);
+    if(len>0){player.vx=px/len;player.vy=py/len;}
+    else if(!touchOrigin){player.vx=0;player.vy=0;}
+    player.x+=player.vx*player.speed*dt;
+    player.y+=player.vy*player.speed*dt;
+    player.x=Math.max(player.r,Math.min(canvas.width-player.r,player.x));
+    player.y=Math.max(player.r,Math.min(canvas.height-player.r,player.y));
+
+    // DRAW PLAYER
+    ctx.fillStyle="white";
+    ctx.beginPath();
+    ctx.arc(player.x,player.y,player.r,0,Math.PI*2);
+    ctx.fill();
+
+    // BOSS IA EMBOSCADA
+    if(phase2){
+        const dx = (player.x - (boss.x + boss.w/2));
+        const dy = (player.y - (boss.y + boss.h/2));
+        const dist = Math.hypot(dx, dy);
+        if(dist > 150){
+            const angle=Math.atan2(dy,dx);
+            boss.x += Math.cos(angle)*boss.speed*dt;
+            boss.y += Math.sin(angle)*boss.speed*dt;
+            boss.x = Math.min(Math.max(boss.x,0),canvas.width-boss.w);
+            boss.y = Math.min(Math.max(boss.y,0),canvas.height-boss.h*2);
+        }
+    }
+
+    // DRAW BOSS
+    ctx.fillStyle="white";
+    ctx.fillRect(boss.x,boss.y,boss.w,boss.h);
+    ctx.fillStyle="#3fa9f5";
+    ctx.fillRect(boss.x,boss.y+boss.h,boss.w,boss.h);
+
+    // SPAWN ATTACKS
+    if(attackDelay>0) attackDelay-=dt;
+    else{
+        attackCooldown-=dt;
+        if(attackCooldown<=0){spawnAttack();attackCooldown=1;}
+    }
+
+    // DRAW BEAMS
+    beams.forEach(b=>{
+        b.t-=dt;
+        const fire=b.t<=0.3;
+        ctx.strokeStyle=fire?"white":"red";
+        ctx.lineWidth=40;
+        ctx.beginPath();
+        // vertical
+        if(b.type==="v"){
+            ctx.moveTo(b.x,0); ctx.lineTo(b.x,canvas.height);
+            if(fire && player.x + player.r >= b.x - 20 && player.x - player.r <= b.x + 20) endGame();
+        }
+        // horizontal
+        if(b.type==="h"){
+            ctx.moveTo(0,b.y); ctx.lineTo(canvas.width,b.y);
+            if(fire && player.y + player.r >= b.y - 20 && player.y - player.r <= b.y + 20) endGame();
+        }
+        // diagonal
+        if(b.type==="d"){
+            const cx=b.x||canvas.width/2; const cy=b.y||canvas.height/2;
+            ctx.save();ctx.translate(cx,cy);ctx.rotate(b.angle);ctx.moveTo(-1000,b.offset);ctx.lineTo(1000,b.offset);ctx.restore();
+            const dx = player.x - cx;
+            const dy = player.y - cy;
+            const dist = Math.abs(dx*Math.sin(b.angle)-dy*Math.cos(b.angle)-b.offset);
+            if(fire && dist <= player.r + 20) endGame();
+        }
+        ctx.stroke();
+    });
+
+    // SCORE
+    ctx.fillStyle="white";
+    ctx.font="18px Arial";
+    ctx.fillText("Score: "+Math.floor(score),20,30);
+    ctx.fillText("Recorde: "+bestScore,20,55);
+
+    requestAnimationFrame(loop);
+}
+
+// ===== START / GAMEOVER =====
+function startGame(){
+    document.getElementById("startScreen").style.display="none";
+    document.getElementById("gameOverScreen").style.display="none";
+    score=0; phase2=false; phaseTimer=0;
+    beams=[]; attackDelay=2; attackCooldown=1;
+    player.alive=true; player.x=canvas.width/2; player.y=canvas.height-140;
+    boss.x=canvas.width/2-40; boss.y=30;
+    running=true; lastTime=performance.now();
+    requestAnimationFrame(loop);
+}
+
+function endGame(){
+    running=false;
+    bestScore=Math.max(bestScore,Math.floor(score));
+    localStorage.setItem("bestScore",bestScore);
+    document.getElementById("finalScore").innerText=`Score: ${Math.floor(score)} | Recorde: ${bestScore}`;
+    document.getElementById("gameOverScreen").style.display="flex";
+}
+</script>
+
+</body>
+</html>
